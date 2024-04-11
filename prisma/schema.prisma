@@ -1,0 +1,159 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  username String @unique
+  email    String @unique
+  pwhash   String
+  role     Role   @default(user)
+
+  firstName String?
+  lastName  String?
+
+  //milyen elemeket fizetett
+  paid   Expense[] @relation(name: "payer")
+  //tartozasai
+  debts  Debt[]
+  //csoportok, amiknek tagja
+  groups Group[]
+
+  BalanceA Balance[] @relation("userA")
+  BalanceB Balance[] @relation("userB")
+  Payment  Payment[]
+
+  @@map("users")
+}
+
+model Group {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  name     String
+  members  User[]
+  expenses Expense[]
+  Balance  Balance[]
+
+  @@map("groups")
+}
+
+model Expense {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+  name      String
+
+  payerId Int
+  payer   User @relation(name: "payer", fields: [payerId], references: [id])
+
+  groupId Int
+  group   Group @relation(fields: [groupId], references: [id])
+
+  amount       Float
+  currency     Currency        @default(HUF)
+  category     ExpenseCategory @default(Grocery)
+  distribution Distribution    @default(equal)
+  description  String?
+
+  debts Debt[]
+
+  @@map("expenses")
+}
+
+model Debt {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  amount    Float
+  currency2 Currency
+
+  //melyik kiadashoz tartozik
+  expenseId Int
+  expense   Expense @relation(fields: [expenseId], references: [id])
+  //melyik user fizeti
+  userId    Int
+  user      User    @relation(fields: [userId], references: [id])
+
+  BalanceA   Balance? @relation(name: "userADebtsToB", fields: [balanceIdA], references: [id])
+  balanceIdA Int?
+
+  BalanceB   Balance? @relation(name: "userBDebtsToA", fields: [balanceIdB], references: [id])
+  balanceIdB Int?
+
+  @@map("debts")
+}
+
+enum Currency {
+  HUF
+  EUR
+  USD
+  RUB
+  JPY
+}
+
+enum ExpenseCategory {
+  Grocery
+  Restaurant
+  Ticket
+  Travel
+}
+
+enum Distribution {
+  equal
+  proportional
+  exact_amounts
+}
+
+enum Role {
+  user
+  admin
+}
+
+model Balance {
+  id Int @id @default(autoincrement())
+
+  groupId Int
+  group   Group @relation(fields: [groupId], references: [id])
+
+  userAId Int
+  userA   User @relation(name: "userA", fields: [userAId], references: [id])
+  userBId Int
+  userB   User @relation(name: "userB", fields: [userBId], references: [id])
+
+  userADebtsToB Debt[] @relation(name: "userADebtsToB")
+  userBDebtsToA Debt[] @relation(name: "userBDebtsToA")
+
+  userAPaid Payment[] @relation("userAPaid")
+  userBPaid Payment[] @relation("userBPaid")
+}
+
+model Payment {
+  id       Int      @id @default(autoincrement())
+  amount   Float
+  currency Currency
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
+
+  balanceA   Balance? @relation(name: "userAPaid", fields: [balanceIdA], references: [id])
+  balanceIdA Int?
+  balanceB   Balance? @relation(name: "userBPaid", fields: [balanceIdB], references: [id])
+  balanceIdB Int?
+}
