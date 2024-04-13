@@ -4,7 +4,6 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { Observable } from 'rxjs';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
@@ -27,13 +26,13 @@ export class ExpenseGuard implements CanActivate {
       where: { id: +expenseId },
       select: { groupId: true },
     });
+
     const group = await this.prismaService.group.findUnique({
       where: { id: groupId.groupId },
       include: { members: { select: { id: true } } },
     });
     const groupMembers = group.members.map((member) => member.id);
 
-    console.log('groupId', groupId);
     if (groupMembers.includes(user.id)) {
       return true;
     }

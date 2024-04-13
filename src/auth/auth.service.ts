@@ -1,4 +1,10 @@
-import { ForbiddenException, HttpException, HttpStatus, Injectable, UseGuards } from '@nestjs/common';
+import {
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  UseGuards,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SignupDTO, SigninDTO } from './dto';
 import * as argon from 'argon2';
@@ -16,7 +22,15 @@ export class AuthService {
     private jwt: JwtService,
     private configService: ConfigService,
   ) {}
-  async signup(dto: SignupDTO) {
+
+  async signupUser(dto: SignupDTO) {
+    return this.signup(dto, Role.user);
+  }
+
+  async signupAdmin(dto: SignupDTO) {
+    return this.signup(dto, Role.admin);
+  }
+  async signup(dto: SignupDTO, role: Role) {
     const hash = await argon.hash(dto.password);
     try {
       const user: User = await this.prismaService.user.create({
@@ -24,7 +38,7 @@ export class AuthService {
           username: dto.username,
           email: dto.email,
           pwhash: hash,
-          role: dto.role,
+          role: role,
         },
       });
       const token = await this.signToken(user.id, user.email, user.role);
@@ -33,15 +47,21 @@ export class AuthService {
         role: user.role,
       };
     } catch (error) {
-      console.log(error); 
-      
+      console.log(error);
+
       const field = error.meta.target[0];
       if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
-          if(field === "username"){
-            throw new HttpException('Username is already taken', HttpStatus.BAD_REQUEST);
-          }else if(field === "email"){
-            throw new HttpException('Email is already taken', HttpStatus.BAD_REQUEST);
+          if (field === 'username') {
+            throw new HttpException(
+              'Username is already taken',
+              HttpStatus.BAD_REQUEST,
+            );
+          } else if (field === 'email') {
+            throw new HttpException(
+              'Email is already taken',
+              HttpStatus.BAD_REQUEST,
+            );
           }
         }
       }
@@ -67,19 +87,14 @@ export class AuthService {
 
     const token = await this.signToken(user.id, user.email, user.role);
     console.log(token);
-    
-      return {
-        token,
-        role: user.role,
-      };
-    // return this.signToken(user.id, user.email, user.role);
+
+    return {
+      token,
+      role: user.role,
+    };
   }
 
-  async signToken(
-    userId: number,
-    email: string,
-    role: Role,
-  ): Promise<string> {
+  async signToken(userId: number, email: string, role: Role): Promise<string> {
     const payload = {
       sub: userId,
       email,

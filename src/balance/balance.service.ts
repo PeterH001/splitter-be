@@ -76,7 +76,7 @@ export class BalanceService {
           }
         });
 
-        //lehetséges az, hogy valamiből többet fizettél be, mint kellett volna, ezért a youowe negatív előjelű lesz. 
+        //lehetséges az, hogy valamiből többet fizettél be, mint kellett volna, ezért a youowe negatív előjelű lesz.
         //Ez a balanceByCurrenciesnél rendeződik, ott úgy is előjel alapján szórja szét a tartozásokat
         //kivonni, amennyit már befizettél
         youPaid.forEach((payment) => {
@@ -88,7 +88,10 @@ export class BalanceService {
             youOweGroupedByCurrencies[index].amount -= payment.amount;
           } else {
             //fölöslegesen, pluszba fizetett be olyan valutát, amivel a másik nem is tartozik neki, ezt negatív előjellel beviszem
-            youOweGroupedByCurrencies.push({amount: -payment.amount, currency: payment.currency})
+            youOweGroupedByCurrencies.push({
+              amount: -payment.amount,
+              currency: payment.currency,
+            });
           }
         });
 
@@ -109,15 +112,18 @@ export class BalanceService {
         });
 
         //TODO: ITT KIVONNI AZ OTHERPAIDET
-        //lehetséges az, hogy valamiből többet fizettél be, mint kellett volna, ezért a youowe negatív előjelű lesz. 
+        //lehetséges az, hogy valamiből többet fizettél be, mint kellett volna, ezért a youowe negatív előjelű lesz.
         //Ez a balanceByCurrenciesnél rendeződik, ott úgy is előjel alapján szórja szét a tartozásokat
         //kivonni, amennyit már a másik befizetett
-        console.log("mennyivel tartoznak neked, currencynként csoportosítva:", youAreOwedGroupedByCurrencies);
-        console.log("a másik mennyi micsodát fizetett: ", otherPaid);
-        
+        console.log(
+          'mennyivel tartoznak neked, currencynként csoportosítva:',
+          youAreOwedGroupedByCurrencies,
+        );
+        console.log('a másik mennyi micsodát fizetett: ', otherPaid);
+
         otherPaid.forEach((payment) => {
-          console.log("otherpaid payment: ", payment);
-          
+          console.log('otherpaid payment: ', payment);
+
           const index = youAreOwedGroupedByCurrencies.findIndex(
             (sumWithCurrency) => sumWithCurrency.currency === payment.currency,
           );
@@ -126,7 +132,10 @@ export class BalanceService {
             youAreOwedGroupedByCurrencies[index].amount -= payment.amount;
           } else {
             //fölöslegesen, pluszba fizetett be olyan valutát, amivel a másik nem is tartozik neki, ezt negatív előjellel beviszem
-            youAreOwedGroupedByCurrencies.push({amount: -payment.amount, currency: payment.currency})
+            youAreOwedGroupedByCurrencies.push({
+              amount: -payment.amount,
+              currency: payment.currency,
+            });
           }
         });
 
@@ -189,6 +198,85 @@ export class BalanceService {
         };
       }),
     );
-    return filteredBalances;
+
+    // a csoportba mennyit kell fizetned, a csoportból mennyit kell visszakapnod ÖSSZESEN, nem csupán emberenként.
+    let youOweInGroup: { amount: number; currency: Currency }[] = [];
+    let youAreOwedInGroup: { amount: number; currency: Currency }[] = [];
+    let yourBalanceInGroup: { amount: number; currency: Currency }[] = [];
+
+    const asd = filteredBalances;
+    asd.forEach((filteredBalance) => {
+       const youOweToAPerson = filteredBalance.youOwe.map((debt) => ({
+        ...debt,
+      }));
+      const youAreOwedByAPerson = filteredBalance.youAreOwed.map((debt) => ({
+        ...debt,
+      }));
+
+      youOweToAPerson.forEach((debtByCurrency) => {
+        const index = youOweInGroup.findIndex(
+          (elem) => elem.currency === debtByCurrency.currency,
+        );
+        if (index !== -1) {
+          youOweInGroup[index].amount += debtByCurrency.amount;
+        } else {
+          youOweInGroup.push(debtByCurrency);
+        }
+      });
+
+      youAreOwedByAPerson.forEach((debtByCurrency) => {
+        const index = youAreOwedInGroup.findIndex(
+          (elem) => elem.currency === debtByCurrency.currency,
+        );
+        if (index !== -1) {
+          youAreOwedInGroup[index].amount += debtByCurrency.amount;
+        } else {
+          youAreOwedInGroup.push(debtByCurrency);
+        }
+      });
+    });
+    console.log('youOweInGroup: ', youOweInGroup);
+    console.log('youAreOwedInGroup: ', youAreOwedInGroup);
+
+    yourBalanceInGroup = youAreOwedInGroup.map((debt) => ({ ...debt }));
+    youOweInGroup.forEach((debtByCurrency) => {
+      const index = yourBalanceInGroup.findIndex(
+        (elem) => elem.currency === debtByCurrency.currency,
+      );
+      if (index !== -1) {
+        yourBalanceInGroup[index].amount -= debtByCurrency.amount;
+        if (yourBalanceInGroup[index].amount === 0) {
+          yourBalanceInGroup.splice(index, 1);
+        }
+      } else {
+        yourBalanceInGroup.push({
+          amount: -debtByCurrency.amount,
+          currency: debtByCurrency.currency,
+        });
+      }
+    });
+    console.log('yourBalanceInGroup: ', yourBalanceInGroup);
+
+    return {
+      balances: filteredBalances,
+      yourBalanceInGroup,
+    };
+  }
+
+  async yourGroupBalance(groupId: number, userId:  number){
+    const result = await this.getMyBalancesByGroup(groupId, userId);
+    return result.yourBalanceInGroup;
+  }
+
+  async findBalance(groupId: number, userId1: number, userId2: number){
+    return await this.prismaService.balance.findFirst({
+      where:{
+        groupId: groupId,
+        OR:[
+          {userAId: userId1, userBId: userId2},
+          {userAId: userId2, userBId: userId1}
+        ]
+      }
+    })
   }
 }

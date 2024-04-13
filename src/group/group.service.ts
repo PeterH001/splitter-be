@@ -95,7 +95,6 @@ export class GroupService {
         });
       });
 
-      //objektumba gyűjti
       for (const currency in debtsMap) {
         if (debtsMap.hasOwnProperty(currency)) {
           debtsByCurrencies.push({
@@ -440,13 +439,20 @@ export class GroupService {
     console.log('in update group');
 
     try {
-      let group: Group = await this.prismaService.group.update({
+      let group = await this.prismaService.group.update({
         where: {
           id: id,
         },
         data: {
           name: updateGroupDto.groupName,
         },
+        include:{
+          members:{
+            select:{
+              id: true
+            }
+          }
+        }
       });
 
       console.log(updateGroupDto);
@@ -462,7 +468,28 @@ export class GroupService {
               connect: updateGroupDto.userIds.map((userId) => ({ id: userId })),
             },
           },
+          include:{
+            members: {
+              select:{
+                id: true
+              }
+            }
+          }
         });
+
+        //a  már meglévő tagokkal létrehozok egy balanceot
+        //az új tagok már a groupmemberben benne vannak, így ha azon végigszaladok, akkor az újaknak egymással is lesz balanceuk
+        for (let i = 0; i < updateGroupDto.userIds.length; i++) {
+          for (let j = 0; j < group.members.length; j++) {
+            const userAid = updateGroupDto.userIds[i];
+            const userBid = group.members[j].id;
+
+            //önmagukkal ne legyen balanceuk
+            if(userAid !== userBid && !await this.balanceService.findBalance(group.id, userAid, userBid)){
+              await this.balanceService.createBalance(group.id, userAid, userBid);
+            }
+          }
+        }
       }
 
       return group;

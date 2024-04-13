@@ -14,4 +14,11 @@ export class BalanceController {
     getMyBalancesByGroupId(@Param('id') groupId: string, @GetUser() user: User){
         return this.balanceServise.getMyBalancesByGroup(+groupId, user.id);
     }
+    
+    @UseGuards(GroupGuard) 
+    @Get('yourgroupbalance/:id')
+    yourGroupBalance(@Param('id') groupId: string, @GetUser() user: User){
+        return this.balanceServise.yourGroupBalance(+groupId, user.id);
+    }
+
 }

@@ -11,7 +11,13 @@ export class AuthController {
   @Post('signup')
   @HttpCode(HttpStatus.CREATED)
   signup(@Body() dto: SignupDTO) {
-    return this.authService.signup(dto);
+    return this.authService.signupUser(dto);
+  }
+
+  @Post('/admin/signup')
+  @HttpCode(HttpStatus.CREATED)
+  signupAdmin(@Body() dto: SignupDTO) {
+    return this.authService.signupAdmin(dto);
   }
   
   @Post('signin')

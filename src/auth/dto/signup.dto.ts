@@ -13,9 +13,4 @@ export class SignupDTO {
   @IsString()
   @IsNotEmpty()
   password: string;
-
-  
-  @IsEnum(Role)
-  @IsOptional()
-  role?: Role;
 }
