@@ -1,7 +1,7 @@
 import { Injectable, UseGuards } from '@nestjs/common';
 import { Currency } from '@prisma/client';
-import { JwtGuard } from 'src/auth/guard';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { JwtGuard } from '../../auth/guard/jwt.guard';
+import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePaymentDTO, UpdatePaymentDTO } from '../dto';
 
 @UseGuards(JwtGuard)

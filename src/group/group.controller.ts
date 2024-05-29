@@ -11,9 +11,9 @@ import {
 import { GroupService } from './group.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { UpdateGroupDTO } from './dto/update-group.dto';
-import { GroupGuard, JwtGuard, RolesGuard } from 'src/auth/guard';
+import { GroupGuard, JwtGuard, RolesGuard } from '../auth/guard';
 import { User } from '@prisma/client';
-import { GetUser, Roles } from 'src/auth/decorator';
+import { GetUser, Roles } from '../auth/decorator';
 import { AddOrRemoveUserDTO } from './dto/add-or-remove-user.dto';
 
 @UseGuards(JwtGuard)
@@ -74,6 +74,12 @@ export class GroupController {
   @Patch(':id/removeuser')
   removeUser(@Param('id') id: string, @Body() addUserDto: AddOrRemoveUserDTO) {
     return this.groupService.removeUser(+id, addUserDto);
+  }
+
+  @UseGuards(GroupGuard)
+  @Patch(':id/leave')
+  leaveGroup(@Param('id') id: string, @GetUser() user: User) {
+    return this.groupService.leaveGroup(+id, user.id);
   }
 
   @UseGuards(GroupGuard)

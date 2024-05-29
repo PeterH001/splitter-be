@@ -1,12 +1,11 @@
-import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { User } from '@prisma/client';
 import { GetUser } from '../auth/decorator/get-user.decorator';
 import { JwtGuard, RolesGuard } from '../auth/guard';
 import { UserService } from './user.service';
 import { FindUserDTO, PatchUserDTO } from './dto';
-import { Roles } from 'src/auth/decorator';
+import { Roles } from '../auth/decorator';
 
-//TODO: User CRUD
 @UseGuards(JwtGuard)
 @Controller('users')
 export class UserController {
@@ -21,15 +20,22 @@ export class UserController {
     return this.userService.findAll();
   }
 
-  // azért post és body, nem pedig get és param, mert ha csak stringet kap a contains, valamiért _ref: String is missing errort kapok
-  @Post('find')
-  // findUsersByUsernamePartial(@Body() dto: FindUserDTO) {
-  findUsersByUsernamePartial(@Body() dto: FindUserDTO) {    
-    return this.userService.findUsersByUsernamePartial(dto);
+  @UseGuards(RolesGuard)
+  @Roles(['admin'])
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.userService.findOne(+id);
   }
 
   @Patch('me')
   patchMe(@GetUser() user: User, @Body() dto: PatchUserDTO) {
-    return this.userService.patchMe(user.id, dto);
+    return this.userService.patchUser(user.id, dto);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(['admin'])
+  @Patch(':id')
+  updateById(@Param('id') id: string, @Body() dto: PatchUserDTO) {
+    return this.userService.patchUser(+id, dto);
   }
 }

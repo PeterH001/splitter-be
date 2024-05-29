@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   CreateExpenseDTO,
+  ExactAmountsDebtDataDTO,
   ProportionalDebtDataDTO,
   UpdateExpenseDTO,
 } from './dto';
@@ -10,7 +11,7 @@ import {
   Expense,
   ExpenseCategory,
 } from '@prisma/client';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
 //TODO: létrehozni a debteket az elosztás módjának megfelelően
@@ -66,7 +67,6 @@ export class ExpenseService {
               ],
             },
           });
-          console.log('balance: ', balance);
           //userA tartozik userB-nek
           if(balance.userAId === debt.userId && balance.userBId === expense.payerId){
             await this.prismaService.balance.update({
@@ -387,10 +387,12 @@ function isSumEqualToValue(array: number[], targetSum: number): boolean {
   let sum = 0;
   for (const num of array) {
     sum += num;
+    console.log('sum: ', sum)
     if (sum > targetSum) {
       return false;
     }
   }
+  console.log('targetSum: ', targetSum)
 
   console.log('array:', array);
   console.log('targetSum:', targetSum);
@@ -401,12 +403,16 @@ function isSumEqualToValue(array: number[], targetSum: number): boolean {
 }
 
 function createDebtsData(dto: UpdateExpenseDTO) {
-  let debtsData = [];
+  let debtsData: {
+    userId: number,
+    amount: number,
+    currency: Currency
+  }[] = [];
   if (
     dto.distributionType &&
     dto.distributionType === Distribution.exact_amounts
   ) {
-    dto.exactAmountsDebtData.map((data) => {
+    dto.exactAmountsDebtData.map((data: ExactAmountsDebtDataDTO) => {
       debtsData.push({
         userId: data.userId,
         amount: data.amount,

@@ -1,10 +1,16 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { SigninDTO, SignupDTO } from './dto';
-import { RolesGuard } from './guard';
 
 @Controller('auth')
-@UseGuards(RolesGuard)
 export class AuthController {
   constructor(private authService: AuthService) {}
 
@@ -19,7 +25,7 @@ export class AuthController {
   signupAdmin(@Body() dto: SignupDTO) {
     return this.authService.signupAdmin(dto);
   }
-  
+
   @Post('signin')
   @HttpCode(HttpStatus.OK)
   signin(@Body() dto: SigninDTO) {

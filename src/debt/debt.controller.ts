@@ -11,9 +11,9 @@ import {
 import { DebtService } from './debt.service';
 import { CreateDebtDTO } from './dto/create-debt.dto';
 import { UpdateDebtDTO } from './dto/update-debt.dto';
-import { GetUser, Roles } from 'src/auth/decorator';
+import { GetUser, Roles } from '../auth/decorator';
 import { User } from '@prisma/client';
-import { JwtGuard, RolesGuard } from 'src/auth/guard';
+import { JwtGuard, RolesGuard } from '../auth/guard';
 
 @UseGuards(JwtGuard)
 @Controller('debt')

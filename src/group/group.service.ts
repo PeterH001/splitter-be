@@ -1,16 +1,20 @@
-import { Injectable } from '@nestjs/common';
-import { ExpenseCategory, Group, User } from '@prisma/client';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { Currency, Group, User } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 import { AddOrRemoveUserDTO, CreateGroupDto, UpdateGroupDTO } from './dto';
-import { BalanceService } from 'src/balance/balance.service';
+import { BalanceService } from '../balance/balance.service';
+import { Edge, Money, Vertex } from '../types';
+import { Graph } from '../algorithms/simplify';
+import { PaymentService } from '../payment/payment/payment.service';
 
 @Injectable()
 export class GroupService {
   constructor(
     private prismaService: PrismaService,
     private balanceService: BalanceService,
+    private paymentService: PaymentService,
   ) {}
-  async create(createGroupDto: CreateGroupDto, user: User) {
+  async create(createGroupDto: CreateGroupDto, user: User) {    
     const connectUsers =
       createGroupDto.userIds.length > 0
         ? createGroupDto.userIds.map((userId) => ({ id: userId }))
@@ -19,6 +23,7 @@ export class GroupService {
       const group: Group = await this.prismaService.group.create({
         data: {
           name: createGroupDto.groupName,
+          simplify: createGroupDto.simplify,
           members: {
             connect: connectUsers,
           },
@@ -126,6 +131,7 @@ export class GroupService {
     const filteredGroup = {
       id: group.id,
       name: group.name,
+      simplify: group.simplify,
       members: group.members,
     };
     return filteredGroup;
@@ -169,6 +175,317 @@ export class GroupService {
       },
     });
 
+    
+    //megjelenítendő expensek
+    const filteredExpenses = groupDetails.expenses.map((expense) => {
+      let payerName;
+      if (expense.payer.firstName && expense.payer.lastName) {
+        payerName = expense.payer.firstName + ' ' + expense.payer.lastName;
+      } else {
+        payerName = expense.payer.username;
+      }
+      
+      let debtAmount = 0;
+      if (expense.debts.length > 0) {
+        expense.debts.forEach((debt) => {
+          debtAmount = debt.amount;
+        });
+      } else {
+        debtAmount = null;
+      }
+      
+      return {
+        id: expense.id,
+        name: expense.name,
+        amount: expense.amount,
+        currency: expense.currency,
+        category: expense.category,
+        distribution: expense.distribution,
+        debtAmount,
+        payerName,
+      };
+    });
+    
+    let balanceOfUser = await this.balanceService.getMyBalancesByGroup(
+      id,
+      userId,
+    );
+    
+    const payments = await this.paymentService.findByGroupId(id);
+    console.log(payments);
+
+    return {
+      id: groupDetails.id,
+      name: groupDetails.name,
+      members: groupDetails.members,
+      expenses: filteredExpenses,
+      balanceOfUser,
+      payments,
+    };
+  }
+
+  async findMembersByGroupId(id: number) {
+    try {
+      const group = await this.prismaService.group.findUnique({
+        where: {
+          id,
+        },
+        include: {
+          members: {
+            select: {
+              id: true,
+              username: true,
+            },
+          },
+        },
+      });
+      return group.members;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async update(id: number, updateGroupDto: UpdateGroupDTO) {
+    try {
+      let group = await this.prismaService.group.update({
+        where: {
+          id: id,
+        },
+        data: {
+          name: updateGroupDto.groupName,
+          simplify: updateGroupDto.simplify,
+        },
+        include: {
+          members: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      });
+
+      if (updateGroupDto.userIds.length > 0) {
+        group = await this.prismaService.group.update({
+          where: {
+            id: id,
+          },
+          data: {
+            members: {
+              connect: updateGroupDto.userIds.map((userId) => ({ id: userId })),
+            },
+          },
+          include: {
+            members: {
+              select: {
+                id: true,
+              },
+            },
+          },
+        });
+
+        //a  már meglévő tagokkal létrehozok egy balanceot
+        //az új tagok már a groupmemberben benne vannak, így ha azon végigszaladok, akkor az újaknak egymással is lesz balanceuk
+        for (let i = 0; i < updateGroupDto.userIds.length; i++) {
+          for (let j = 0; j < group.members.length; j++) {
+            const userAid = updateGroupDto.userIds[i];
+            const userBid = group.members[j].id;
+
+            if (
+              userAid !== userBid &&
+              !(await this.balanceService.findBalance(
+                group.id,
+                userAid,
+                userBid,
+              ))
+            ) {
+              await this.balanceService.createBalance(
+                group.id,
+                userAid,
+                userBid,
+              );
+            }
+          }
+        }
+      }
+
+      return group;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async addUser(id: number, addUserDto: AddOrRemoveUserDTO) {
+    try {
+      await this.prismaService.group.update({
+        where: {
+          id: id,
+        },
+        data: {
+          updatedAt: new Date(),
+          members: {
+            connect: {
+              id: addUserDto.id,
+            },
+          },
+        },
+      });
+      return await this.prismaService.group.findUnique({
+        where: {
+          id: id,
+        },
+        include: {
+          members: true,
+        },
+      });
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async removeUser(id: number, dto: AddOrRemoveUserDTO) {
+    const userExpenses = await this.prismaService.expense.findMany({
+      where: {
+        groupId: id,
+        payerId: dto.id,
+      },
+    });
+
+    const userDebts = await this.prismaService.debt.findMany({
+      where: {
+        userId: dto.id,
+        expense: {
+          groupId: id,
+        },
+      },
+    });
+
+    if (userExpenses.length === 0 && userDebts.length === 0) {
+      await this.prismaService.group.update({
+        where: {
+          id: id,
+        },
+        data: {
+          members: {
+            disconnect: {
+              id: dto.id,
+            },
+          },
+        },
+      });
+      return await this.prismaService.group.findUnique({
+        where: {
+          id: id,
+        },
+        include: {
+          members: true,
+        },
+      });
+    }else{
+      throw new BadRequestException('Can not remove user, because they have expenses or debts in the group');
+    }
+  }
+
+  async leaveGroup(id: number, userId: number){
+    const dto: AddOrRemoveUserDTO = {id: userId}
+    return await this.removeUser(id, dto);
+  }
+
+  async remove(id: number) {
+    await this.prismaService.$transaction(async (prisma) => {
+      const expenses = await prisma.expense.findMany({
+        where: {
+          groupId: id,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      const balances = await this.prismaService.balance.findMany({
+        where: {
+          groupId: id,
+        },
+      });
+
+      for (const balance of balances) {
+        await prisma.payment.deleteMany({
+          where: {
+            OR: [{ balanceIdA: balance.id }, { balanceIdB: balance.id }],
+          },
+        });
+      }
+
+      await this.prismaService.balance.deleteMany({
+        where: {
+          groupId: id,
+        },
+      });
+
+      for (const expense of expenses) {
+        await prisma.debt.deleteMany({
+          where: {
+            expenseId: expense.id,
+          },
+        });
+      }
+
+      await prisma.expense.deleteMany({
+        where: {
+          groupId: id,
+        },
+      });
+
+      await prisma.group.delete({
+        where: {
+          id: id,
+        },
+      });
+    });
+
+    return {
+      message: 'this group was deleted:',
+      group: id,
+    };
+  }
+
+  //deprecated
+  async calcualteUserBalances(id: number, userId: number) {
+    const groupDetails = await this.prismaService.group.findUnique({
+      where: {
+        id: id,
+      },
+      include: {
+        members: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        expenses: {
+          include: {
+            payer: {
+              select: {
+                id: true,
+                username: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+            debts: {
+              where: {
+                userId,
+              },
+              select: {
+                amount: true,
+                currency2: true,
+              },
+            },
+          },
+        },
+      },
+    });
     //-------------- bejelentkezett user mennyivel tartozik kinek ---------
     //minden groupmember összes expense a groupban, benne a bejelentkezett tartozása
     const expensesWithDebtsByUsers = await Promise.all(
@@ -208,6 +525,7 @@ export class GroupService {
       .map(
         //egy user kiadásai
         (expensesWithDebtsOfUser) => {
+          //
           let debtsOfUsers: {
             userId: number;
             username: string;
@@ -218,7 +536,7 @@ export class GroupService {
             //egy user egy kiadása
             (expenseWithDebtsByUser) => {
               const debt = expenseWithDebtsByUser.debts[0];
-              //csak egy lesz benne
+              //csak egy lesz benne, mert a lekérdezésnél minden expense debtjeiből kiszűrtük, ami a bejelentkezett userhez tartozik
               if (debt) {
                 const index = debtsOfUsers.findIndex(
                   (debtsOfUser) =>
@@ -252,7 +570,6 @@ export class GroupService {
               }
             },
           );
-
           return debtsOfUsers;
         },
       )
@@ -282,14 +599,12 @@ export class GroupService {
       return {
         id: myExpenseInGroup.id,
         expenseName: myExpenseInGroup.name,
-        debts: myExpenseInGroup.debts.map((debt) => {
-          return {
-            userId: debt.user.id,
-            username: debt.user.username,
-            amount: debt.amount,
-            currency: debt.currency2,
-          };
-        }),
+        debts: myExpenseInGroup.debts.map((debt) => ({
+          userId: debt.user.id,
+          username: debt.user.username,
+          amount: debt.amount,
+          currency: debt.currency2,
+        })),
       };
     });
 
@@ -375,243 +690,6 @@ export class GroupService {
         });
       }
     });
-
-    const filteredExpenses = groupDetails.expenses.map((expense) => {
-      let payerName;
-      if (expense.payer.firstName && expense.payer.lastName) {
-        payerName = expense.payer.firstName + ' ' + expense.payer.lastName;
-      } else {
-        payerName = expense.payer.username;
-      }
-      let isUserInvolved: boolean = false;
-      let debtAmount = 0;
-      if (expense.debts.length > 0) {
-        isUserInvolved = true;
-        expense.debts.forEach((debt) => {
-          debtAmount = debt.amount;
-        });
-      } else {
-        debtAmount = null;
-      }
-      return {
-        id: expense.id,
-        name: expense.name,
-        amount: expense.amount,
-        currency: expense.currency,
-        category: expense.category,
-        distribution: expense.distribution,
-        debtAmount,
-        payerName,
-      };
-    });
-
-    return {
-      id: groupDetails.id,
-      name: groupDetails.name,
-      members: groupDetails.members,
-      expenses: filteredExpenses,
-      balanceOfUser: membersOweMe,
-    };
-  }
-
-  async findMembersByGroupId(id: number) {
-    try {
-      const group = await this.prismaService.group.findUnique({
-        where: {
-          id,
-        },
-        include: {
-          members: {
-            select: {
-              id: true,
-              username: true,
-            },
-          },
-        },
-      });
-      return group.members;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async update(id: number, updateGroupDto: UpdateGroupDTO) {
-    console.log('in update group');
-
-    try {
-      let group = await this.prismaService.group.update({
-        where: {
-          id: id,
-        },
-        data: {
-          name: updateGroupDto.groupName,
-        },
-        include:{
-          members:{
-            select:{
-              id: true
-            }
-          }
-        }
-      });
-
-      console.log(updateGroupDto);
-      console.log(group);
-
-      if (updateGroupDto.userIds.length > 0) {
-        group = await this.prismaService.group.update({
-          where: {
-            id: id,
-          },
-          data: {
-            members: {
-              connect: updateGroupDto.userIds.map((userId) => ({ id: userId })),
-            },
-          },
-          include:{
-            members: {
-              select:{
-                id: true
-              }
-            }
-          }
-        });
-
-        //a  már meglévő tagokkal létrehozok egy balanceot
-        //az új tagok már a groupmemberben benne vannak, így ha azon végigszaladok, akkor az újaknak egymással is lesz balanceuk
-        for (let i = 0; i < updateGroupDto.userIds.length; i++) {
-          for (let j = 0; j < group.members.length; j++) {
-            const userAid = updateGroupDto.userIds[i];
-            const userBid = group.members[j].id;
-
-            //önmagukkal ne legyen balanceuk
-            if(userAid !== userBid && !await this.balanceService.findBalance(group.id, userAid, userBid)){
-              await this.balanceService.createBalance(group.id, userAid, userBid);
-            }
-          }
-        }
-      }
-
-      return group;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async addUser(id: number, addUserDto: AddOrRemoveUserDTO) {
-    try {
-      const group: Group = await this.prismaService.group.update({
-        where: {
-          id: id,
-        },
-        data: {
-          updatedAt: new Date(),
-          members: {
-            connect: {
-              username: addUserDto.username,
-            },
-          },
-        },
-      });
-      return await this.prismaService.group.findUnique({
-        where: {
-          id: id,
-        },
-        include: {
-          members: true,
-        },
-      });
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async removeUser(id: number, addUserDto: AddOrRemoveUserDTO) {
-    try {
-      const group: Group = await this.prismaService.group.update({
-        where: {
-          id: id,
-        },
-        data: {
-          updatedAt: new Date(),
-          members: {
-            disconnect: {
-              username: addUserDto.username,
-            },
-          },
-        },
-      });
-      return await this.prismaService.group.findUnique({
-        where: {
-          id: id,
-        },
-        include: {
-          members: true,
-        },
-      });
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async remove(id: number) {
-    await this.prismaService.$transaction(async (prisma) => {
-      const expenses = await prisma.expense.findMany({
-        where: {
-          groupId: id,
-        },
-        select: {
-          id: true,
-        },
-      });
-
-      const balances = await this.prismaService.balance.findMany({
-        where:{
-          groupId: id
-        }
-      })
-      
-      for (const balance of balances){
-        await prisma.payment.deleteMany({
-          where:{
-            OR:[
-              {balanceIdA: balance.id},
-              {balanceIdB: balance.id}
-            ]
-          }
-        })
-      }
-
-      await this.prismaService.balance.deleteMany({
-        where:{
-          groupId: id
-        }
-      })
-      
-      for (const expense of expenses) {
-        await prisma.debt.deleteMany({
-          where: {
-            expenseId: expense.id,
-          },
-        });
-      }
-
-      await prisma.expense.deleteMany({
-        where: {
-          groupId: id,
-        },
-      });
-
-      await prisma.group.delete({
-        where: {
-          id: id,
-        },
-      });
-    });
-    
-    return {
-      group: id,
-      message: 'this group was deleted:',
-    };
+    //------------------------------------------------------
   }
 }

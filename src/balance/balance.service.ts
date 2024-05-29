@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { Currency } from '@prisma/client';
-import { PrismaService } from 'src/prisma/prisma.service';
-import { UserService } from 'src/user/user.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { Edge, Money, Vertex } from 'src/types';
+import { UserService } from '../user/user.service';
+import { Graph } from '../algorithms/simplify';
 
 @Injectable()
 export class BalanceService {
@@ -19,7 +21,7 @@ export class BalanceService {
     });
   }
 
-  async getMyBalancesByGroup(groupId: number, userId: number) {
+  async calculateMyBalancesByGroup(groupId: number, userId: number) {
     const balances = await this.prismaService.balance.findMany({
       where: {
         groupId: groupId,
@@ -39,12 +41,11 @@ export class BalanceService {
           userId === balance.userAId
             ? balance.userADebtsToB
             : balance.userBDebtsToA;
-        // console.log('youOwe:', youOwe);
+        
         const youAreOwed =
           userId === balance.userAId
             ? balance.userBDebtsToA
             : balance.userADebtsToB;
-        // console.log('youAreOwed:', youAreOwed);
 
         const youPaid =
           userId === balance.userAId ? balance.userAPaid : balance.userBPaid;
@@ -111,19 +112,10 @@ export class BalanceService {
           }
         });
 
-        //TODO: ITT KIVONNI AZ OTHERPAIDET
         //lehetséges az, hogy valamiből többet fizettél be, mint kellett volna, ezért a youowe negatív előjelű lesz.
         //Ez a balanceByCurrenciesnél rendeződik, ott úgy is előjel alapján szórja szét a tartozásokat
         //kivonni, amennyit már a másik befizetett
-        console.log(
-          'mennyivel tartoznak neked, currencynként csoportosítva:',
-          youAreOwedGroupedByCurrencies,
-        );
-        console.log('a másik mennyi micsodát fizetett: ', otherPaid);
-
         otherPaid.forEach((payment) => {
-          console.log('otherpaid payment: ', payment);
-
           const index = youAreOwedGroupedByCurrencies.findIndex(
             (sumWithCurrency) => sumWithCurrency.currency === payment.currency,
           );
@@ -158,8 +150,8 @@ export class BalanceService {
           }
         });
 
-        let sumYouOwe: { amount: number; currency: Currency }[] = [];
-        let sumYouAreOwed: { amount: number; currency: Currency }[] = [];
+        let sumYouOwe: Money[] = [];
+        let sumYouAreOwed: Money[] = [];
 
         balanceByCurrencies.forEach((balanceByCurrency) => {
           if (balanceByCurrency.amount > 0) {
@@ -173,9 +165,6 @@ export class BalanceService {
           }
         });
 
-        // console.log('balanceByCurrencies2: ', balanceByCurrencies);
-
-        // console.log('sumyouAreOwedByCurrencies: ', youAreOwedGroupedByCurrencies);
         const userA = await this.userService.findOne(balance.userAId);
         const userB = await this.userService.findOne(balance.userBId);
         let you: { id: number; username: string };
@@ -199,14 +188,15 @@ export class BalanceService {
       }),
     );
 
-    // a csoportba mennyit kell fizetned, a csoportból mennyit kell visszakapnod ÖSSZESEN, nem csupán emberenként.
-    let youOweInGroup: { amount: number; currency: Currency }[] = [];
-    let youAreOwedInGroup: { amount: number; currency: Currency }[] = [];
-    let yourBalanceInGroup: { amount: number; currency: Currency }[] = [];
+    //te összesen bárkinek mennyivel tartozol, ezeknek a különbsége.
+    //Eredmény: a csoportba mennyit kell fizetned, a csoportból mennyit kell visszakapnod ÖSSZESEN, nem csupán emberenként.
+    let youOweInGroup: Money[] = [];
+    let youAreOwedInGroup: Money[] = [];
+    let yourBalanceInGroup: Money[] = [];
 
     const asd = filteredBalances;
     asd.forEach((filteredBalance) => {
-       const youOweToAPerson = filteredBalance.youOwe.map((debt) => ({
+      const youOweToAPerson = filteredBalance.youOwe.map((debt) => ({
         ...debt,
       }));
       const youAreOwedByAPerson = filteredBalance.youAreOwed.map((debt) => ({
@@ -235,8 +225,6 @@ export class BalanceService {
         }
       });
     });
-    console.log('youOweInGroup: ', youOweInGroup);
-    console.log('youAreOwedInGroup: ', youAreOwedInGroup);
 
     yourBalanceInGroup = youAreOwedInGroup.map((debt) => ({ ...debt }));
     youOweInGroup.forEach((debtByCurrency) => {
@@ -255,7 +243,6 @@ export class BalanceService {
         });
       }
     });
-    console.log('yourBalanceInGroup: ', yourBalanceInGroup);
 
     return {
       balances: filteredBalances,
@@ -263,20 +250,296 @@ export class BalanceService {
     };
   }
 
-  async yourGroupBalance(groupId: number, userId:  number){
-    const result = await this.getMyBalancesByGroup(groupId, userId);
+  async getMyBalancesByGroup(groupId: number, userId: number) {
+    const group = await this.prismaService.group.findUnique({
+      where: {
+        id: groupId,
+      },
+    });
+    let simplify: boolean = group.simplify;
+    let myBalances = await this.calculateMyBalancesByGroup(groupId, userId);
+
+    if (simplify) {
+      const simplified = await this.simplifyGroupDebts(groupId);
+      let simplifiedBalances: {
+        id: number;
+        groupId: number;
+        you: {
+          id: number;
+          username: string;
+        };
+        other: {
+          id: number;
+          username: string;
+        };
+        youOwe: Money[];
+        youAreOwed: Money[];
+      }[] = myBalances.balances.map((balance) => ({
+        id: balance.id,
+        groupId: balance.groupId,
+        you: balance.you,
+        other: balance.other,
+        youOwe: ([] = []),
+        youAreOwed: ([] = []),
+      }));
+      simplified.forEach((simplifiedByCurrency) => {
+        const edgesOfUser = simplifiedByCurrency.edges.filter(
+          (edge) => edge.source.id === userId || edge.drain.id === userId,
+        );
+        edgesOfUser.forEach((edge) => {
+          if (edge.source.id === userId) {
+            let balance = simplifiedBalances.find(
+              (simplifiedBalance) =>
+                simplifiedBalance.you.id === edge.source.id &&
+                simplifiedBalance.other.id === edge.drain.id,
+            );
+            balance.youOwe.push({
+              amount: edge.amount,
+              currency: simplifiedByCurrency.currency,
+            });
+          } else if (edge.drain.id === userId) {
+            let balance = simplifiedBalances.find(
+              (simplifiedBalance) =>
+                simplifiedBalance.you.id === edge.drain.id &&
+                simplifiedBalance.other.id === edge.source.id,
+            );
+            balance.youAreOwed.push({
+              amount: edge.amount,
+              currency: simplifiedByCurrency.currency,
+            });
+          }
+        });
+      });
+
+      myBalances.balances = simplifiedBalances;
+    }
+
+    return myBalances;
+  }
+
+  async yourGroupBalance(groupId: number, userId: number) {
+    const result = await this.calculateMyBalancesByGroup(groupId, userId);
     return result.yourBalanceInGroup;
   }
 
-  async findBalance(groupId: number, userId1: number, userId2: number){
+  async findBalance(groupId: number, userId1: number, userId2: number) {
     return await this.prismaService.balance.findFirst({
-      where:{
+      where: {
         groupId: groupId,
-        OR:[
-          {userAId: userId1, userBId: userId2},
-          {userAId: userId2, userBId: userId1}
-        ]
-      }
-    })
+        OR: [
+          { userAId: userId1, userBId: userId2 },
+          { userAId: userId2, userBId: userId1 },
+        ],
+      },
+    });
+  }
+
+  async findBalancesByGroupId(groupId: number) {
+    return await this.prismaService.balance.findMany({
+      where: {
+        groupId: groupId,
+      },
+      include: {
+        userADebtsToB: {
+          select: {
+            amount: true,
+            currency2: true,
+          },
+        },
+        userAPaid: {
+          select: {
+            amount: true,
+            currency: true,
+          },
+        },
+        userBDebtsToA: {
+          select: {
+            amount: true,
+            currency2: true,
+          },
+        },
+        userBPaid: {
+          select: {
+            amount: true,
+            currency: true,
+          },
+        },
+      },
+    });
+  }
+
+  async simplifyGroupDebts(groupId: number) {
+    let vertices: Vertex[] = [];
+    let edgesByCurrencies: { edges: Edge[]; currency: Currency }[] = [];
+    let groupBalances: any[] = [];
+
+    const group = await this.prismaService.group.findUnique({
+      where: {
+        id: groupId,
+      },
+      include: {
+        members: {
+          select: {
+            id: true,
+            username: true,
+          },
+        },
+      },
+    });
+
+    const members = group.members;
+    members.map((member) => {
+      vertices.push({ id: member.id, username: member.username });
+    });
+
+    groupBalances = await this.findBalancesByGroupId(groupId);
+   
+    groupBalances.forEach((balance) => {
+      let userAowesToBByCurrencies: Money[] = [];
+      let userBowesToAByCurrencies: Money[] = [];
+
+      //összegyűjtjük valutánként a tartozás mértékét
+      balance.userADebtsToB.forEach((debt) => {
+        const index = userAowesToBByCurrencies.findIndex(
+          (debtByCurrency) => debtByCurrency.currency === debt.currency2,
+        );
+
+        if (index != -1) {
+          userAowesToBByCurrencies[index].amount += debt.amount;
+        } else {
+          userAowesToBByCurrencies.push({
+            amount: debt.amount,
+            currency: debt.currency2,
+          });
+        }
+      });
+
+      //kivonjuk, amennyit már kifizetett
+      balance.userAPaid.forEach((payment) => {
+        const index = userAowesToBByCurrencies.findIndex(
+          (debtByCurrency) => debtByCurrency.currency === payment.currency,
+        );
+
+        if (index != -1) {
+          const result = (userAowesToBByCurrencies[index].amount -=
+            payment.amount);
+          if (result === 0) {
+            //ha kiegyenlítette a tartozást, kivesszük a listából
+            userAowesToBByCurrencies.splice(index, 1);
+          }
+        } else {
+          userAowesToBByCurrencies.push({
+            amount: -payment.amount,
+            currency: payment.currency,
+          });
+        }
+      });
+
+      balance.userBDebtsToA.forEach((debt) => {
+        const index = userBowesToAByCurrencies.findIndex(
+          (debtByCurrency) => debtByCurrency.currency === debt.currency2,
+        );
+
+        if (index != -1) {
+          userBowesToAByCurrencies[index].amount += debt.amount;
+        } else {
+          userBowesToAByCurrencies.push({
+            amount: debt.amount,
+            currency: debt.currency2,
+          });
+        }
+      });
+
+      //kivonjuk, amennyit már kifizetett
+      balance.userBPaid.forEach((payment) => {
+        const index = userBowesToAByCurrencies.findIndex(
+          (debtByCurrency) => debtByCurrency.currency === payment.currency,
+        );
+
+        if (index != -1) {
+          const result = (userBowesToAByCurrencies[index].amount -=
+            payment.amount);
+          if (result === 0) {
+            //ha kiegyenlítette a tartozást, kivesszük a listából
+            userBowesToAByCurrencies.splice(index, 1);
+          }
+        } else {
+          userBowesToAByCurrencies.push({
+            amount: -payment.amount,
+            currency: payment.currency,
+          });
+        }
+      });
+
+      //b tartozásait kivonom a-ból
+      userBowesToAByCurrencies.forEach((bOwes) => {
+        const index = userAowesToBByCurrencies.findIndex(
+          (aOwes) => aOwes.currency === bOwes.currency,
+        );
+
+        if (index != -1) {
+          const result = (userAowesToBByCurrencies[index].amount -=
+            bOwes.amount);
+          if (result === 0) {
+            //ha A és B tartozása egymás felé ugyanakkora
+            userAowesToBByCurrencies.splice(index, 1);
+          }
+        } else {
+          userAowesToBByCurrencies.push({
+            amount: -bOwes.amount,
+            currency: bOwes.currency,
+          });
+        }
+      });
+
+      userAowesToBByCurrencies.forEach((debt) => {
+        let source: Vertex;
+        let drain: Vertex;
+        let amount: number;
+
+        if (debt.amount > 0) {
+          source = vertices.find((vertex) => vertex.id === balance.userAId);
+          drain = vertices.find((vertex) => vertex.id === balance.userBId);
+          amount = debt.amount;
+        } else if (debt.amount < 0) {
+          source = vertices.find((vertex) => vertex.id === balance.userBId);
+          drain = vertices.find((vertex) => vertex.id === balance.userAId);
+          amount = -debt.amount;
+        } else {
+          throw new Error("debt can't be 0");
+        }
+        const newEdge: Edge = { source, drain, amount };
+
+        const index = edgesByCurrencies.findIndex(
+          (edgesOfACurrency) => edgesOfACurrency.currency === debt.currency,
+        );
+
+        if (index !== -1) {
+          edgesByCurrencies[index].edges.push(newEdge);
+        } else {
+          edgesByCurrencies.push({ edges: [newEdge], currency: debt.currency });
+        }
+      });
+    });
+
+    edgesByCurrencies.forEach((edgesOfACurrency) => {
+      let graph: Graph = new Graph(vertices, edgesOfACurrency.edges);
+      //Simplify
+      const result = graph.simplify();
+      let simplifiedEdges: Edge[] = [];
+      result.forEach((simplifiedEdge) => {
+        const source: Vertex = simplifiedEdge.source.name;
+        const drain: Vertex = simplifiedEdge.drain.name;
+        const amount = simplifiedEdge.amount;
+        const newEdgeOfACurrency: Edge = {
+          source,
+          drain,
+          amount,
+        };
+        simplifiedEdges.push(newEdgeOfACurrency);
+      });
+      edgesOfACurrency.edges = simplifiedEdges;
+    });
+    return edgesByCurrencies;
   }
 }

@@ -10,10 +10,10 @@ import {
 } from '@nestjs/common';
 import { ExpenseService } from './expense.service';
 import { CreateExpenseDTO, UpdateExpenseDTO } from './dto';
-import { JwtGuard, RolesGuard } from 'src/auth/guard';
-import { GetUser, Roles } from 'src/auth/decorator';
+import { JwtGuard, RolesGuard } from '../auth/guard';
+import { GetUser, Roles } from '../auth/decorator';
 import { User } from '@prisma/client';
-import { ExpenseGuard } from 'src/auth/guard/expense.guard';
+import { ExpenseGuard } from '../auth/guard/expense.guard';
 
 @UseGuards(JwtGuard)
 @Controller('expense')

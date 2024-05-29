@@ -2,6 +2,7 @@ import { User } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -13,6 +14,10 @@ export class CreateGroupDto {
   @IsNotEmpty()
   @IsString()
   groupName: string;
+
+  @IsNotEmpty()
+  @IsBoolean()
+  simplify: boolean;
 
   @IsOptional()
   @IsArray()

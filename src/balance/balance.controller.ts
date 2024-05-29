@@ -1,8 +1,8 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { BalanceService } from './balance.service';
-import { GetUser } from 'src/auth/decorator';
+import { GetUser } from '../auth/decorator';
 import { User } from '@prisma/client';
-import { GroupGuard, JwtGuard } from 'src/auth/guard';
+import { GroupGuard, JwtGuard } from '../auth/guard';
 
 @UseGuards(JwtGuard)
 @Controller('balance')
@@ -11,7 +11,7 @@ export class BalanceController {
 
     @UseGuards(GroupGuard) 
     @Get(':id')
-    getMyBalancesByGroupId(@Param('id') groupId: string, @GetUser() user: User){
+    getMyBalancesByGroup(@Param('id') groupId: string, @GetUser() user: User){
         return this.balanceServise.getMyBalancesByGroup(+groupId, user.id);
     }
     

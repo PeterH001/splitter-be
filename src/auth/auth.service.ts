@@ -30,6 +30,7 @@ export class AuthService {
   async signupAdmin(dto: SignupDTO) {
     return this.signup(dto, Role.admin);
   }
+
   async signup(dto: SignupDTO, role: Role) {
     const hash = await argon.hash(dto.password);
     try {
@@ -70,19 +71,16 @@ export class AuthService {
   }
 
   async login(dto: SigninDTO) {
-    //find user by id
-    console.log('login called');
-
     const user = await this.prismaService.user.findUnique({
       where: {
         email: dto.email,
       },
     });
-    //if doesnt find throw error
+    
     if (!user) throw new ForbiddenException('Credentials incorrect');
-    //compare pw
+    
     const pwMatches = await argon.verify(user.pwhash, dto.password);
-    //if pw incorrect throw error
+
     if (!pwMatches) throw new ForbiddenException('Credentials incorrect');
 
     const token = await this.signToken(user.id, user.email, user.role);
@@ -103,10 +101,11 @@ export class AuthService {
 
     const secret = this.configService.get('JWT_SECRET');
     const access_token = await this.jwt.signAsync(payload, {
-      expiresIn: '15m',
+      expiresIn: '60m',
       secret,
     });
 
     return access_token;
   }
 }
+

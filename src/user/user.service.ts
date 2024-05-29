@@ -1,7 +1,7 @@
-import { ConflictException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, NotFoundException, UseGuards } from '@nestjs/common';
 import { User } from '@prisma/client';
-import { PrismaService } from 'src/prisma/prisma.service';
-import { FindUserDTO, PatchUserDTO } from './dto';
+import { PrismaService } from '../prisma/prisma.service';
+import { PatchUserDTO } from './dto';
 
 @Injectable()
 export class UserService {
@@ -24,35 +24,27 @@ export class UserService {
   }
 
   async findOne(id: number){
-    return this.prismaService.user.findUnique({
+    const result =  await this.prismaService.user.findUnique({
       where:{
         id
-      }
-    })
-  }
-
-  async findUsersByUsernamePartial(
-    dto: FindUserDTO,
-  ): Promise<{ id: number; username: string }[]> {
-    console.log(dto);
-
-    const users = await this.prismaService.user.findMany({
-      where: {
-        username: {
-          contains: dto.partialUsername,
-          mode: 'insensitive',
-        },
       },
       select: {
         id: true,
         username: true,
+        email: true,
+        firstName: true,
+        lastName: true,
       },
-    });
-    return users;
+    })
+    if(!result){
+      throw new NotFoundException('User not found');
+    }
+    
+    return result;
   }
 
   async findAll() {
-    return this.prismaService.user.findMany({
+    return await this.prismaService.user.findMany({
       select: {
         id: true,
         username: true,
@@ -60,7 +52,7 @@ export class UserService {
     });
   }
 
-  async patchMe(id: number, dto: PatchUserDTO) {
+  async patchUser(id: number, dto: PatchUserDTO) {
     try {
       const currentUser: User = await this.prismaService.user.findUnique({
         where: {

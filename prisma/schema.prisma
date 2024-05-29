@@ -5,7 +5,7 @@
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-dbml-generator"
 }
 
 datasource db {
@@ -46,6 +46,7 @@ model Group {
   updatedAt DateTime @default(now())
 
   name     String
+  simplify Boolean @default(false)
   members  User[]
   expenses Expense[]
   Balance  Balance[]

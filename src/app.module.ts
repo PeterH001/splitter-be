@@ -8,6 +8,8 @@ import { ExpenseModule } from './expense/expense.module';
 import { DebtModule } from './debt/debt.module';
 import { BalanceModule } from './balance/balance.module';
 import { PaymentModule } from './payment/payment.module';
+import { AlgorithmsModule } from './algorithms/algorithms.module';
+import { TestingModule } from '@nestjs/testing';
 
 @Module({
   imports: [
@@ -20,6 +22,7 @@ import { PaymentModule } from './payment/payment.module';
     DebtModule,
     BalanceModule,
     PaymentModule,
+    AlgorithmsModule
   ],
   controllers: [],
   providers: [],
